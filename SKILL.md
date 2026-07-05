@@ -1,13 +1,15 @@
 ---
 name: speech-to-prose
-version: 0.2.0
+version: 0.4.0
 description: |
-  把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是字幕、沒有時間軸）。
-  跑雙路 ASR（Breeze + VibeVoice）交叉比對修正術語與英文，再整理成保留原始字句與段落、
-  輕度清理的可讀短文，輸出 .md。當用戶說「整理成短文」「整理成文字稿」「把錄音整理成文章」
-  「逐字整理」「不要做字幕」「最接近原話」「把這段語音整理成文章」，或給一個錄音/演講音檔、
+  把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是 SRT 字幕；
+  每段開頭帶對齊 ASR 的大概時間戳，可選輸出段落帶時間戳的 epub 電子書）。
+  中文影音跑雙路 ASR（Breeze + VibeVoice）整理成繁中散文；**英文（非中文）影音預設產「中英對照版」**
+  （英文在上、繁中翻譯在下，段落帶時間戳）。輸出 .md，保留原始字句與段落、輕度清理。
+  當用戶說「整理成短文」「整理成文字稿」「把錄音整理成文章」「逐字整理」「不要做字幕」「最接近原話」
+  「把這段語音整理成文章」「中英對照」「英文影片做對照」，或給一個錄音/演講音檔、
   影片、YouTube 連結並表明要「可讀文字稿而非字幕」時使用。
-  觸發詞範例：`整理成短文`、`整理成文字稿`、`把錄音整理成文章`、`不要做字幕`、`最接近原話`。
+  觸發詞範例：`整理成短文`、`整理成文字稿`、`把錄音整理成文章`、`不要做字幕`、`最接近原話`、`中英對照`。
   不要用於：要帶時間軸的 SRT 字幕（用 srt）、要摘要重點（用 podcast-digest 或 polish）、
   已有文字只想潤稿（用 polish）、翻譯（用 translator 類）。
 allowed-tools:
@@ -20,14 +22,16 @@ mutating: true
 
 # speech-to-prose — 語音 → 忠於原話的整理短文
 
-把講者的錄音整理成一篇**保留原始字句與段落**的繁體中文短文。與 `srt` 的根本差異：srt 產出帶時間軸的 SRT 字幕並走重型字幕校正管線；本技能產出**流暢散文（無時間軸、無 SRT 結構）**，核心是把雙路 ASR 融成忠於原話的可讀文章。
+把講者的錄音整理成一篇**保留原始字句與段落**的繁體中文短文。與 `srt` 的根本差異：srt 產出帶逐句時間軸的 SRT 字幕並走重型字幕校正管線；本技能產出**流暢散文（非 SRT 結構）**，核心是把雙路 ASR 融成忠於原話的可讀文章——每段開頭附**段落級大概時間戳**方便對照影片（非逐句字幕時間軸）。
 
 ## Contract（保證）
 
 - 輸出一份 `.md` 短文，**忠於講者原始用詞與語感**，只做輕度清理（補標點、修 ASR 錯字、修英文/術語、分段、刪純贅詞），**不摘要、不改寫語意、不正規化口語**。
-- 用**雙路 ASR 交叉比對**（Breeze 主 + VibeVoice 輔）提高術語與英文正確率。
+- 中文影音用**雙路 ASR 交叉比對**（Breeze 主 + VibeVoice 輔）提高術語與英文正確率。
+- **英文（非中文）影音預設產「中英對照版」**：英文（來源語）在上、繁中忠實翻譯在下，每段帶時間戳（見 Step 0.5 / 英文分支）。用戶明確只要純中文可覆寫。
 - 通過**散文品質 gate**（coverage 不足會警示）才算完成。
-- 不產生字幕、不嵌字幕、不輸出時間軸。
+- **每段開頭帶對齊 ASR 時間軸的 `[HH:MM:SS]` 大概時間戳（預設開）**；可用 `--epub` 另輸出「段落帶時間戳」的 epub 電子書。
+- 不產生 SRT 字幕、不嵌字幕。時間戳是**段落級大概值**（非逐句時間軸、非字幕）。
 
 ## Fidelity Mode（必先確定，預設 faithful）
 
@@ -68,7 +72,41 @@ mkdir -p "$WORK"
 # 本地檔 cp 進 WORK（不動原檔）；YouTube 用 srt 的 yt-dlp 慣例下載到 WORK
 ```
 
-### Step 1：雙路 ASR（重用 srt）
+### Step 0.5：語言偵測 → 決定分支
+
+- **YouTube**：`yt-dlp --skip-download --print "%(language)s" "<url>"`。
+- **本地檔**：無法從 metadata 判斷時，跑 mlx_whisper 前 30 秒自動偵測，或直接聽/看內容判斷。
+- **語言為 `zh*` → 中文分支**（Step 1 雙路 ASR，原流程，產繁中散文）。
+- **語言為非中文（en 等）→ 英文/對照分支**（走下方「英文分支」，**預設產中英對照版**）。用戶明確只要純中文散文才不做對照。
+
+### Step 1：雙路 ASR（中文分支，重用 srt）
+
+短音檔（≤ 55 分鐘）：
+```bash
+cd "${SUBTITLE_DIR}" && ./subtitle.sh "$WORK/<檔名>" --breeze        # Breeze 主
+cd "$WORK" && python3 "$VV_SCRIPT" "$WORK/<檔名>" --terms "$TERMS" --terms-max 50 --json \
+    --output "$WORK/<檔名>_vibevoice.srt"                            # VibeVoice 輔（平行）
+```
+兩者可平行（Breeze + VV 是 srt 標準平行組合）。
+
+**長音檔（> 55 分鐘）必須走切段**（mlx_audio 硬限 59 分，超過靜默 trim）：
+```bash
+python3 "${SUBTITLE_DIR}/vv_longaudio.py" "$WORK/<檔名>" --terms "$TERMS" --terms-max 50 \
+    --output-json "$WORK/<檔名>_vibevoice.json" --output-srt "$WORK/<檔名>_vibevoice.srt"
+```
+
+### Step 1（英文分支）：英文 ASR（單路 Whisper，反幻覺旗標必帶）
+
+英文用 mlx_whisper large-v3（**不跑 Breeze/VV，那是中文雙路**）。**反幻覺旗標必帶**——實測預設會在尾段/靜音處進入重複幻覺迴圈、吃掉大段內容：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+mlx_whisper "$WORK/<檔名>.wav" --model mlx-community/whisper-large-v3-mlx --language en \
+    --condition-on-previous-text False --hallucination-silence-threshold 2 \
+    --output-format srt --output-dir "$WORK" --output-name "<檔名>_en"
+```
+- 產 `<檔名>_en.srt`（英文、含時間軸）。跑完**掃尾段**確認沒有重複句迴圈（幻覺徵兆：均勻 0.5s 分段 + 同句重複）；若有 → 幻覺沒壓下，調高 `--hallucination-silence-threshold` 或加 `--compression-ratio-threshold 2.4` 重跑。
+- 抽純文字：`python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_en.srt" > "$WORK/_en.txt"`。
 
 短音檔（≤ 55 分鐘）：
 ```bash
@@ -109,9 +147,21 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 
 > 以上是**雲端模式（預設）**。要本地整理見 Step 3b。
 
+### Step 3（英文分支）：中英對照整理（latent）
+
+英文影音預設走這裡。用 `_en.txt` 產「中英對照」草稿：
+
+- **英文段落（faithful，輕度清理）**：合併 ASR 破碎斷句成通順段落、修明顯 ASR 錯字（人名/產品名/專有名詞先查再改，不確定用〔註：…〕）、正確標點大小寫；不摘要、不改寫。
+- **繁中翻譯（faithful，台灣用語）**：忠實翻譯該段，不摘要不加料；技術術語保留英文原文，其餘自然中文；語氣貼近講者。
+- **版面**：每個段落單元 = 一行英文（來源語）在上、一行繁中翻譯在下，單元間空行分隔。**英文與中文各自只佔一行**（段落內文不換行，用標點連貫）——這是 `prose_timestamp.py --bilingual` 的結構契約。
+- **分派**：短內容主 session 直接做；長內容（>~300 行）派 Sonnet subagent 產草稿（EN 段 + ZH 段，同上格式），主 session 校術語。
+- **著作權**：對公開演講/影片做**個人研讀用**的轉錄+翻譯（存私人 inbox、不公開散布）屬合理個人使用；成品加註「個人研讀用，勿轉散布」。
+
+輸出寫到 `$WORK/<簡短名稱>_prose.md`（標題 + meta + 對照段落，先不加時間戳，交給 Step 4.5 `--bilingual`）。
+
 ### Step 3b：本地模式（`--local`，opt-in，fail-closed 不打雲端）
 
-> **Routing**：`--local` 在本技能只代表「Step 3 散文整理改用本地 LLM」，**不是 SRT 字幕本地化**。若用戶要的是帶時間軸的 SRT（即使說了 `--local`），仍 route 到 `srt`；只有要「無時間軸散文」才留在本技能。
+> **Routing**：`--local` 在本技能只代表「Step 3 散文整理改用本地 LLM」，**不是 SRT 字幕本地化**。若用戶要的是帶逐句時間軸的 SRT 字幕（即使說了 `--local`），仍 route 到 `srt`；只有要「非 SRT 字幕的散文」（即使帶段落時間戳）才留在本技能。
 
 **觸發**：用戶說 `--local` /「用本地」/「離線」。預設仍走 Step 3 雲端（潤飾較精）；本地模式省雲端額度、可離線，忠實度足夠但潤飾略淺（gemma4:26b 對拍實測 coverage 0.91、ASR 諧音/英文術語修正達標、繁中乾淨、~43s/短段）。
 
@@ -146,27 +196,64 @@ python3 "$SP_DIR/scripts/prose_coverage.py" --asr "$WORK/_breeze.txt" --prose "$
 - 0.6–1.3 → 通過（faithful 整理通常比 ASR 略短：刪語助詞）。
 gate 只警示不阻斷，但 WARN 必須處理或向用戶說明。
 
+### Step 4.5：段落時間戳（deterministic，預設開）
+
+把 ASR 時間軸對齊到散文，每段開頭就地加 `[HH:MM:SS]　` 前綴。**用 Breeze srt**（時間軸細、錨點密）：
+
+```bash
+# 中文散文：對齊 Breeze srt
+python3 "$SP_DIR/scripts/prose_timestamp.py" "$WORK/<檔名>.srt" "$WORK/<簡短名稱>_prose.md"
+# 短片想用 [MM:SS]：加 --fmt ms
+
+# 英文中英對照版：對齊英文 srt + --bilingual（只戳英文行、中文譯文行原樣，尾端補硬換行讓英上中下）
+python3 "$SP_DIR/scripts/prose_timestamp.py" "$WORK/<檔名>_en.srt" "$WORK/<簡短名稱>_prose.md" --bilingual
+```
+
+- 演算法：8-gram 叢集錨定（非中毒游標）→ 單調骨架 → 相鄰錨點間按段落序內插 → 單調 clamp。**冪等**（已加戳可安全 re-run）。
+- **`--bilingual`**：每空行分隔區塊只取**首行（來源語）**對齊加戳 + 尾端補 markdown 硬換行；其餘行（譯文）原樣保留。防呆：首行若中文為主 → 判結構畸形、跳過並 WARN（來源語應在上）。
+- **fail-closed**：錨定覆蓋率 < 0.5（或零錨點）→ exit 2 **不寫**（多半是 srt 與 md 不對應）。確認無誤要硬寫用 `--force`。
+- 輸出摘要 `段數/錨點/覆蓋率/首尾時間/非單調`；**覆蓋率應 > 0.6、非單調應為 0**，否則查。
+- 標題（`#`）、前言（`>` blockquote / YAML front matter）、code fence 區塊不加戳。時間戳是大概值，**內容近乎重複的相鄰段可能共用時間戳**（對齊本質限制，不影響單調）。
+
+### Step 4.6：可選 epub（`--epub` 時才做）
+
+用戶要「段落帶時間戳的 epub 電子書」時，由**已加戳的** md 產 epub（包 pandoc）：
+
+```bash
+python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
+# 預設輸出同目錄同名 .epub；title 取 md 第一個 # 標題
+```
+
+- 時間戳前綴是段落內文，pandoc 原樣保留 → epub 每段 `<p>` 開頭即帶時間戳（結構同參考的 Allen 3Q2026 epub）。
+- **fail-closed**：無 pandoc → exit 3（提示 `brew install pandoc`）；產出不良構 → exit 2。
+
 ### Step 5：交付 + 清理
 
-- 把成品 `.md` 交付（預設複製到 `inbox/`，或用戶指定位置）。
-- 清理中間檔（`_breeze.txt`/`_vv.txt`/ASR 暫存），保留原音檔與成品 .md。
+- 把成品 `.md`（已加戳）交付（預設複製到 `inbox/`，或用戶指定位置）；若有跑 `--epub`，epub 一併交付。
+- 清理中間檔（`_breeze.txt`/`_vv.txt`/ASR 暫存），**保留原音檔、srt（時間戳來源）、成品 .md / .epub**。
 
 ## 完成後回報
-- 成品 .md 路徑
+- 成品 .md 路徑（+ epub 路徑，若有）
 - 輸入時長、ASR 引擎（Breeze + VV 是否都成功）、長音檔是否走切段
 - coverage ratio + 任何 WARN
+- 時間戳摘要（段數/錨點/覆蓋率/首尾時間）
 - fidelity mode
 
 ## Output（持久化位置宣告）
 
-- 成品短文 `.md`：`${SRT_DATA_DIR}/prose/<簡短名稱>/<簡短名稱>_prose.md`，並複製一份到 `inbox/`（或用戶指定路徑）。
-- 中間 ASR 產物：工作目錄內，Step 5 清理。
+- 成品短文 `.md`（已加段落時間戳）：`${SRT_DATA_DIR}/prose/<簡短名稱>/<簡短名稱>_prose.md`，並複製一份到 `inbox/`（或用戶指定路徑）。
+- 可選 epub（`--epub`）：同目錄 `<簡短名稱>_prose.epub`，一併交付。
+- 中間 ASR 產物：工作目錄內，Step 5 清理（srt 保留為時間戳來源）。
 
 ## 邊界與限制
+- **段落時間戳是大概值**：錨定段誤差數秒、內插段可能微飄，但全程單調不亂序，供對照影片足夠，非逐句字幕精度。覆蓋率過低會 fail-closed（見 Step 4.5）。
+- **英文分支**：單路 Whisper（無雙路交叉比對），**反幻覺旗標必帶**（見 Step 1 英文分支；預設會幻覺迴圈吃內容，跑完必掃尾段）。中英對照為**個人研讀用途**（公開內容的私用轉錄/翻譯），成品加註勿轉散布。
+- **`--bilingual` 對齊只對每區塊首行（來源語）**，結構契約是「來源語一行在上、譯文一行在下」；譯文行不對齊不加戳，首行若中文為主會被判畸形跳過。
+- **epub 需 pandoc**（`brew install pandoc`）；無 pandoc 時 `--epub` fail-closed，不影響 .md 產出。
 - 純音檔跳過任何畫面/投影片處理（本技能本來就不做 caption）。
 - 不做 speaker diarization（多人只在 ASR 明顯輪流時分段）。
 - 極短音檔（< ~30 秒）避免過度分段與過度潤稿。
 - 重用 srt ASR；srt 的 ASR 腳本/路徑變動時，依 Adapter Contract 同步。
 - 本地模式（`--local`，Step 3b）v1 僅短音檔；fail-closed 不自動上雲；預設 gemma4:26b，可用 `SPEECH_TO_PROSE_LOCAL_MODEL` 覆寫。潤飾深度略遜雲端，要最精的整理用預設雲端模式。
-- 需要**講者分離（diarization）/ 結構化摘要 / 高光 / 雙語翻譯 / 帶時間軸逐字稿** → 用 `podcast-digest`（本技能刻意不做 diarization、不產時間軸；兩者是協作不是替代——先 speech-to-prose 快速讀，要深度結構化再 podcast-digest）。
+- 需要**講者分離（diarization）/ 結構化摘要 / 高光 / 帶逐句時間軸的逐字稿** → 用 `podcast-digest`（本技能刻意不做 diarization、只給段落級大概時間戳而非逐句時間軸；本技能的「中英對照」是 faithful 逐段翻譯散文，非結構化摘要——兩者是協作不是替代）。
 - 是「忠於原話的整理」，不是逐字法律級 transcript、也不是摘要。

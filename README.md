@@ -1,7 +1,7 @@
 # speech-to-prose
 
-> Turn a recording/video/YouTube into a **faithful Traditional-Chinese prose write-up** (not subtitles, no timecodes). A [Claude Code](https://claude.com/claude-code) skill.
-> 把錄音／影片／YouTube 轉成**忠於原話的繁體中文整理短文**（不是字幕、沒有時間軸）。一個 [Claude Code](https://claude.com/claude-code) skill。
+> Turn a recording/video/YouTube into a **faithful Traditional-Chinese prose write-up** — not SRT subtitles, but with a per-paragraph approximate timestamp, optional timestamped EPUB, and automatic **bilingual (source + Chinese) output for non-Chinese audio**. A [Claude Code](https://claude.com/claude-code) skill.
+> 把錄音／影片／YouTube 轉成**忠於原話的繁體中文整理短文**——不是 SRT 字幕，但每段開頭帶大概時間戳、可選輸出帶時間戳的 EPUB，英文（非中文）影音則**自動產中英對照版**。一個 [Claude Code](https://claude.com/claude-code) skill。
 
 **[English](#english) · [繁體中文](#繁體中文)**
 
@@ -11,9 +11,15 @@
 
 ### What it does
 
-Sibling skill to [`srt`](https://github.com/fredchu/srt-skill). Where `srt` produces timecoded SRT subtitles through a heavy correction pipeline, `speech-to-prose` produces **flowing prose** that stays faithful to the speaker's original wording and paragraphs — light cleanup only (punctuation, ASR typo/English fixes, paragraphing, filler removal). No summarizing, no rewriting.
+Sibling skill to [`srt`](https://github.com/fredchu/srt-skill). Where `srt` produces per-cue timecoded SRT subtitles through a heavy correction pipeline, `speech-to-prose` produces **flowing prose** that stays faithful to the speaker's original wording and paragraphs — light cleanup only (punctuation, ASR typo/English fixes, paragraphing, filler removal). No summarizing, no rewriting.
 
-Pipeline: dual-ASR (Breeze + VibeVoice, cross-referenced for terms/English) → LLM prose integration (faithful fidelity) → prose coverage gate → `.md`.
+Pipeline (Chinese audio): dual-ASR (Breeze + VibeVoice, cross-referenced for terms/English) → LLM prose integration (faithful fidelity) → prose coverage gate → per-paragraph timestamp alignment → `.md` (optional EPUB).
+
+**Per-paragraph timestamps** (default on): each paragraph is prefixed with an approximate `[HH:MM:SS]` aligned to the ASR timeline via monotonic n-gram anchoring + interpolation (`scripts/prose_timestamp.py`), so you can jump back to the video. Fail-closed when alignment coverage is too low.
+
+**Optional EPUB** (`--epub`): a timestamped-paragraph e-book via pandoc (`scripts/prose_to_epub.py`).
+
+**Bilingual for non-Chinese audio** (default): English (or other non-Chinese) audio is transcribed with Whisper large-v3 (mandatory anti-hallucination flags) and rendered as a **source-on-top / Traditional-Chinese-below** bilingual document, timestamped per paragraph (`prose_timestamp.py --bilingual`). This is for personal study; don't redistribute copyrighted material.
 
 ### Why a separate skill
 
@@ -23,6 +29,8 @@ Prose has fewer mechanical invariants than SRT, so omission and over-editing are
 
 - The [`srt`](https://github.com/fredchu/srt-skill) skill (provides the ASR backends: Breeze via `subtitle.sh`, VibeVoice). MLX / Apple Silicon for local ASR.
 - Python 3, `ffmpeg`. See `srt`'s README for the ASR stack.
+- `mlx-whisper` (Whisper large-v3) for the English/bilingual branch.
+- `pandoc` — optional, only for `--epub`.
 
 ### Install
 
@@ -50,9 +58,15 @@ MIT.
 
 ### 這是什麼
 
-[`srt`](https://github.com/fredchu/srt-skill) 的姊妹技能。`srt` 產出帶時間軸的 SRT 字幕、走重型校正管線；`speech-to-prose` 產出**流暢散文**，忠於講者原始用詞與段落——只做輕度清理（補標點、修 ASR 錯字/英文、分段、刪語助詞），不摘要、不改寫。
+[`srt`](https://github.com/fredchu/srt-skill) 的姊妹技能。`srt` 產出帶逐句時間軸的 SRT 字幕、走重型校正管線；`speech-to-prose` 產出**流暢散文**，忠於講者原始用詞與段落——只做輕度清理（補標點、修 ASR 錯字/英文、分段、刪語助詞），不摘要、不改寫。
 
-流程：雙路 ASR（Breeze + VibeVoice，交叉比對術語/英文）→ LLM 散文整理（faithful 模式）→ 散文品質 gate → `.md`。
+流程（中文影音）：雙路 ASR（Breeze + VibeVoice，交叉比對術語/英文）→ LLM 散文整理（faithful 模式）→ 散文品質 gate → 段落時間戳對齊 → `.md`（可選 EPUB）。
+
+**段落時間戳**（預設開）：每段開頭加對齊 ASR 時間軸的大概 `[HH:MM:SS]`，用單調 n-gram 叢集錨定 + 內插（`scripts/prose_timestamp.py`）方便跳回影片；覆蓋率過低時 fail-closed 不寫。
+
+**可選 EPUB**（`--epub`）：由帶時間戳的散文經 pandoc 產電子書（`scripts/prose_to_epub.py`）。
+
+**英文（非中文）影音預設產中英對照版**：用 Whisper large-v3（**反幻覺旗標必帶**）辨識，排成**來源語在上、繁中翻譯在下**、每段帶時間戳的對照文件（`prose_timestamp.py --bilingual`）。屬個人研讀用途，勿散布受著作權保護內容。
 
 ### 為什麼獨立成技能
 
@@ -62,6 +76,8 @@ MIT.
 
 - [`srt`](https://github.com/fredchu/srt-skill) 技能（提供 ASR 後端：Breeze `subtitle.sh`、VibeVoice）。本地 ASR 需 MLX / Apple Silicon。
 - Python 3、`ffmpeg`。ASR 技術棧見 `srt` 的 README。
+- `mlx-whisper`（Whisper large-v3）：英文／中英對照分支需要。
+- `pandoc`：可選，只有 `--epub` 才需要。
 
 ### 安裝
 

@@ -53,6 +53,8 @@ def main():
         "--metadata", f"title={title}",
         "--metadata", f"author={args.author}",
         "--metadata", "lang=zh-TW",
+        "--toc",                 # 產生目錄
+        "--split-level=2",       # 以 ## 章節標題切分成獨立章節（無 ## 時優雅退化為單章）
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:

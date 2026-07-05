@@ -1,6 +1,6 @@
 ---
 name: speech-to-prose
-version: 0.4.0
+version: 0.4.1
 description: |
   把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是 SRT 字幕；
   每段開頭帶對齊 ASR 的大概時間戳，可選輸出段落帶時間戳的 epub 電子書）。
@@ -108,20 +108,6 @@ mlx_whisper "$WORK/<檔名>.wav" --model mlx-community/whisper-large-v3-mlx --la
 - 產 `<檔名>_en.srt`（英文、含時間軸）。跑完**掃尾段**確認沒有重複句迴圈（幻覺徵兆：均勻 0.5s 分段 + 同句重複）；若有 → 幻覺沒壓下，調高 `--hallucination-silence-threshold` 或加 `--compression-ratio-threshold 2.4` 重跑。
 - 抽純文字：`python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_en.srt" > "$WORK/_en.txt"`。
 
-短音檔（≤ 55 分鐘）：
-```bash
-cd "${SUBTITLE_DIR}" && ./subtitle.sh "$WORK/<檔名>" --breeze        # Breeze 主
-cd "$WORK" && python3 "$VV_SCRIPT" "$WORK/<檔名>" --terms "$TERMS" --terms-max 50 --json \
-    --output "$WORK/<檔名>_vibevoice.srt"                            # VibeVoice 輔（平行）
-```
-兩者可平行（Breeze + VV 是 srt 標準平行組合）。
-
-**長音檔（> 55 分鐘）必須走切段**（mlx_audio 硬限 59 分，超過靜默 trim）：
-```bash
-python3 "${SUBTITLE_DIR}/vv_longaudio.py" "$WORK/<檔名>" --terms "$TERMS" --terms-max 50 \
-    --output-json "$WORK/<檔名>_vibevoice.json" --output-srt "$WORK/<檔名>_vibevoice.srt"
-```
-
 ### Step 2：抽純文字（deterministic）
 
 ```bash
@@ -145,6 +131,8 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 
 輸出寫到 `$WORK/<簡短名稱>_prose.md`（含標題行 + 來源/日期 meta）。
 
+**章節標題（供 epub 目錄，建議）**：在明顯主題轉折處插入 `## [HH:MM:SS] 主題` 標題（時間戳取該段），讓 `--epub` 切出章節目錄（`prose_to_epub.py` 已設 `--split-level=2`）。`##` 標題行不會被 Step 4.5 加段落時間戳（跳過 `#` 行）。約每 1-3 分鐘或每個主題一節；只有一個 `#` 標題、零 `##` 的 md 會產出「沒有章節的單章 epub」。
+
 > 以上是**雲端模式（預設）**。要本地整理見 Step 3b。
 
 ### Step 3（英文分支）：中英對照整理（latent）
@@ -157,7 +145,7 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 - **分派**：短內容主 session 直接做；長內容（>~300 行）派 Sonnet subagent 產草稿（EN 段 + ZH 段，同上格式），主 session 校術語。
 - **著作權**：對公開演講/影片做**個人研讀用**的轉錄+翻譯（存私人 inbox、不公開散布）屬合理個人使用；成品加註「個人研讀用，勿轉散布」。
 
-輸出寫到 `$WORK/<簡短名稱>_prose.md`（標題 + meta + 對照段落，先不加時間戳，交給 Step 4.5 `--bilingual`）。
+輸出寫到 `$WORK/<簡短名稱>_prose.md`（標題 + meta + 對照段落，先不加時間戳，交給 Step 4.5 `--bilingual`）。同中文分支：在主題轉折處插 `## [HH:MM:SS] 主題` 章節標題供 epub 目錄。
 
 ### Step 3b：本地模式（`--local`，opt-in，fail-closed 不打雲端）
 
@@ -225,6 +213,7 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
 ```
 
 - 時間戳前綴是段落內文，pandoc 原樣保留 → epub 每段 `<p>` 開頭即帶時間戳（結構同參考的 Allen 3Q2026 epub）。
+- **章節目錄**：`--toc --split-level=2` 把 md 的 `## 標題` 切成獨立章節 + 產目錄。所以 Step 3 要在主題轉折插 `## [HH:MM:SS] 主題`，否則 epub 只有時間戳、沒有章節（2026-07-05 踩過：早期散文只有一個 `#` 標題 → 產出無章節單章 epub）。
 - **fail-closed**：無 pandoc → exit 3（提示 `brew install pandoc`）；產出不良構 → exit 2。
 
 ### Step 5：交付 + 清理

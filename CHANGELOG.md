@@ -3,6 +3,16 @@
 All notable changes to `speech-to-prose` are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions track the `SKILL.md` frontmatter.
 
+## 0.4.1 - 2026-07-05
+
+### Fixes
+- EPUB chapters: `prose_to_epub.py` now passes `--toc --split-level=2`, so `## ` section
+  headings in the prose become navigable chapters with a table of contents. Prose with only
+  a single `#` title and no `##` headings produced a chapterless single-file EPUB.
+- SKILL.md: Step 3 now instructs inserting `## [HH:MM:SS] topic` section headings at topic
+  boundaries for chapter navigation. Removed a duplicated Chinese dual-ASR block that had been
+  left under the English branch.
+
 ## 0.4.0 - 2026-07-05
 
 ### Features

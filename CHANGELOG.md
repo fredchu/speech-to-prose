@@ -3,6 +3,34 @@
 All notable changes to `speech-to-prose` are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions track the `SKILL.md` frontmatter.
 
+## 0.5.0 - 2026-07-06
+
+### Features
+- **Noun verification pass (Step 3.5).** Proper nouns that contradict their context
+  (companies, tickers, people, jargon) are collected into a sidecar during prose
+  integration, then verified through four evidence layers before any fix is applied:
+  L0 whole-transcript phonetic cross-reference first (the same entity is usually
+  mentioned more than once and mis-recognized differently each time), L1 local sources
+  (speaker glossary / slide OCR terms), L2 neutral web search — **the model's guess is
+  barred from queries** (hypothesis-driven search only confirms itself), L3 keep the
+  `〔註：…〕` mark rather than guess. Confirmed fixes are applied per-occurrence
+  (context-substring locating, never whole-file substitution) and written back to the
+  speaker glossary with provenance comment lines.
+- `scripts/noun_xref.py`: L0 phonetic-variant scanner. Latin-token fuzzy matching with
+  Mandarin-accent confusion folding (v/w→b, catches VIAVI→"BIAB"), merged windows of
+  fragmented tokens (catches "vr a vr"), weak Chinese char-overlap fallback. Recall over
+  precision — output feeds an LLM judgment step. Stdlib only; tests in `scripts/tests/`.
+- Sidecar contract: single JSON envelope per segment; long-audio segment subagents bind
+  the sidecar to their returned prose text with SHA-256 (stale sidecars from retries are
+  detected and dropped); sidecar content never enters `prose.md`, and Step 3.5 completes
+  before the coverage gate and timestamping.
+
+### Docs
+- README (EN/zh): pipeline line + noun-verification section + test instructions.
+- Field-validated on a 7-hour finance livestream: 138 unique flagged nouns, ~100
+  applied fixes incl. KISS→KEYS, "one room"→萬潤, asyna→Synaptics; design converged
+  through 5 adversarial review rounds + 2 implementation verify rounds (codex).
+
 ## 0.4.1 - 2026-07-05
 
 ### Fixes

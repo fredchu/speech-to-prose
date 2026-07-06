@@ -1,6 +1,6 @@
 ---
 name: speech-to-prose
-version: 0.4.1
+version: 0.5.0
 description: |
   把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是 SRT 字幕；
   每段開頭帶對齊 ASR 的大概時間戳，可選輸出段落帶時間戳的 epub 電子書）。
@@ -30,6 +30,7 @@ mutating: true
 - 中文影音用**雙路 ASR 交叉比對**（Breeze 主 + VibeVoice 輔）提高術語與英文正確率。
 - **英文（非中文）影音預設產「中英對照版」**：英文（來源語）在上、繁中忠實翻譯在下，每段帶時間戳（見 Step 0.5 / 英文分支）。用戶明確只要純中文可覆寫。
 - 通過**散文品質 gate**（coverage 不足會警示）才算完成。
+- **不確定的專有名詞經「內部交叉比對＋有界查證」後才修正**（Step 3.5）：查證未收斂者保留〔註：…〕標記，絕不憑單一外部搜尋結果自信改詞。
 - **每段開頭帶對齊 ASR 時間軸的 `[HH:MM:SS]` 大概時間戳（預設開）**；可用 `--epub` 另輸出「段落帶時間戳」的 epub 電子書。
 - 不產生 SRT 字幕、不嵌字幕。時間戳是**段落級大概值**（非逐句時間軸、非字幕）。
 
@@ -124,6 +125,19 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 - 講者明顯離題的插話（如旁白）可獨立成段保留，不刪。
 - 多人對話：**不做 speaker diarization**；只有當 ASR 文字本身明顯有輪流（你問我答）才用分段呈現，否則輸出連續散文。
 - 不確定的人名/作品/時事用語不要改（講者可能引用你不知道的東西）；ASR 嚴重聽不清處用〔註：…〕標記，不硬填。
+- **可疑名詞收集（供 Step 3.5 查證）**：整理時發現「名詞與上下文矛盾、但不確定正解」（公司名/ticker/人名/術語聽起來就不對勁）→ 記入 sidecar（見下），照常先照 ASR 原樣輸出＋標〔註〕。**sidecar 內容絕不寫進 prose.md**。
+
+**Sidecar 契約**（單一 JSON envelope，非陣列非 JSONL）：
+```json
+{"seg": 1, "overflow": false,
+ "items": [{"term": "KISS", "para_head": "有位S9008129想詢問KI",
+            "context": "想詢問KISS在2027年CPO這裡的看法", "guess": "KEYS"}]}
+```
+（`para_head` = 該段落前 10 字，定位輔助；srt 技能的 sidecar 用 `ts` 時間戳，本技能 Step 3 時散文尚未加戳，故用 `para_head`。實際定位以 `context` 子串為準。）
+- `guess` 可選——**只准在查證收斂後拿來比對，禁止用於任何搜尋 query 或候選生成**（防確認偏誤）。
+- `items` 每段上限 10 條，超過取矛盾最明顯前 10、envelope 標 `"overflow": true`。
+- 短音檔（主 session 整理）：寫 `$WORK/_uncertain_terms.json`。
+- 長音檔分段 subagent：各段寫 `$WORK/_uncertain_seg_N.json`，**回傳文字維持純散文**；envelope 多帶 `"prose_sha256"`（該段回傳散文文字的 SHA-256），主 session 聚合時對實收文字重算比對，不符即棄（防 stale/斷點殘留）。
 
 **分派**：
 - 短音檔（單段 ≤ ~300 行純文字）→ 主 session 直接整理。
@@ -173,6 +187,31 @@ python3 "$SP_DIR/scripts/prose_local.py" \
 
 > 簡體偵測是 warning-only（粗字表、不 block；gemma4 對拍實測簡體 0）。要硬性 gate 需換 OpenCC，留 v2。
 
+### Step 3.5：名詞查證（latent＋工具混合，主 session；在 coverage/時間戳之前）
+
+聚合 sidecar（長音檔先過 `prose_sha256` 比對，不符即棄並警示）→ 去重（normalized term 為 key）→ 對每個獨特可疑名詞走**四層查證**，證據不足寧可標〔註〕不硬修：
+
+- **L0 全文內部交叉比對（最優先，零成本）**：同一實體講者通常提多次、ASR 錯法不一致（實例：KISS 在他處被聽對成「keys」）。跑變體叢集掃描，再由 LLM 判讀候選段落的語境是否指向同一實體：
+```bash
+python3 "$SP_DIR/scripts/noun_xref.py" --term "<詞1>" --term "<詞2>" \
+    "$WORK/<檔名>.srt" "$WORK/_breeze.txt" "$WORK/_vv.txt" --json
+```
+- **L1 本地資源**：講者 terms 檔（`srt_correct/terms_<講者>.txt`）、投影片 OCR terms（srt 場景）、wiki。
+- **L2 中性 WebSearch**：**query 只准用上下文關鍵詞**（如「CPO 光通訊 測試設備 股票」），**禁止把猜測答案放進 query**（帶假設搜尋=確認偏誤，2026-07-06 K&S 事故）。搜尋得候選清單後才驗音近。
+- **L3 未收斂**：保留〔註〕，可帶候選寫「〔註：或為 X〕」。
+
+**套用門檻**（滿足其一才改詞，且候選必須是不靠 guess 發現的）：
+1. L0 內部證據：他處音近變體＋該處上下文獨立支持同一實體
+2. L1 權威對應：terms 檔已有／slide OCR 命中／官方名稱與音**完全**相同（全同音，非僅音近）
+3. L2 雙重收斂：中性搜尋候選中**恰一個**同時音近一致＋領域吻合；若換一組上下文關鍵詞結果就變，視為未收斂
+
+**量上限**：聚合後最多 30 個獨特名詞進查證（按出現段數×語境重要性排序，其餘直接 L3）；WebSearch 短音檔 ≤10 次、長音檔 ≤20 次；溢出必須回報統計、不得靜默截斷。
+**修正套用**：以 `context` 子串定位段落、段內精確 match `term` 逐處 Edit；找不到→報告人工確認；絕不全檔字串替換。雙語對照版只改來源語行。
+**查證報告**：逐 mapping 一行 `原詞 → 新詞 @ 位置（證據層級）`＋「考慮過的候選＋淘汰理由」（負面證據）＋溢出統計。
+**回寫**：確認 mapping 寫回講者 terms 檔——provenance 獨立註解行在前、mapping 行保持純 `wrong→correct`（行內加 `#` 會被 srt parser 吃進 term，禁止）。
+**不可驗證類**：會員 ID、暱稱、私人人名→永不搜尋，直接標註。
+**收尾**：刪 `$WORK/_uncertain*.json`（保證 Step 4/4.5 輸入乾淨）。
+
 ### Step 4：散文品質 gate（散文沒有 SRT 的機械不變量，需自己驗）
 
 ```bash
@@ -219,13 +258,14 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
 ### Step 5：交付 + 清理
 
 - 把成品 `.md`（已加戳）交付（預設複製到 `inbox/`，或用戶指定位置）；若有跑 `--epub`，epub 一併交付。
-- 清理中間檔（`_breeze.txt`/`_vv.txt`/ASR 暫存），**保留原音檔、srt（時間戳來源）、成品 .md / .epub**。
+- 清理中間檔（`_breeze.txt`/`_vv.txt`/`_uncertain*.json`/ASR 暫存），**保留原音檔、srt（時間戳來源）、成品 .md / .epub**。
 
 ## 完成後回報
 - 成品 .md 路徑（+ epub 路徑，若有）
 - 輸入時長、ASR 引擎（Breeze + VV 是否都成功）、長音檔是否走切段
 - coverage ratio + 任何 WARN
 - 時間戳摘要（段數/錨點/覆蓋率/首尾時間）
+- 名詞查證摘要（查證 N／修正 M／標註 K／溢出 O；有修正時附逐條 mapping＋證據層級）
 - fidelity mode
 
 ## Output（持久化位置宣告）
@@ -245,4 +285,5 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
 - 重用 srt ASR；srt 的 ASR 腳本/路徑變動時，依 Adapter Contract 同步。
 - 本地模式（`--local`，Step 3b）v1 僅短音檔；fail-closed 不自動上雲；預設 gemma4:26b，可用 `SPEECH_TO_PROSE_LOCAL_MODEL` 覆寫。潤飾深度略遜雲端，要最精的整理用預設雲端模式。
 - 需要**講者分離（diarization）/ 結構化摘要 / 高光 / 帶逐句時間軸的逐字稿** → 用 `podcast-digest`（本技能刻意不做 diarization、只給段落級大概時間戳而非逐句時間軸；本技能的「中英對照」是 faithful 逐段翻譯散文，非結構化摘要——兩者是協作不是替代）。
+- **名詞查證（Step 3.5）是有界的**：上限內查不完的落〔註〕不硬修；帶假設搜尋（把猜測放進 query）被明文禁止——內部交叉比對（L0）優先於一切外部搜尋。
 - 是「忠於原話的整理」，不是逐字法律級 transcript、也不是摘要。

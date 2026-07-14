@@ -1,6 +1,6 @@
 ---
 name: speech-to-prose
-version: 0.6.0
+version: 0.6.1
 description: |
   把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是 SRT 字幕；
   每段開頭帶對齊 ASR 的大概時間戳，預設同時輸出段落帶時間戳的 epub 電子書）。
@@ -259,6 +259,7 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md" --cov
 ```
 
 - `--cover` 只收 jpg/png（Apple Books 相容性策略；webp 是合法 EPUB media type 但先轉檔）；驗 magic bytes、關係鏈（OPF cover-image ↔ spine 首項 wrapper）、temp+atomic replace，全 fail-closed exit 2。
+- **前置頁已精簡**（0.6.1）：不產題名頁（`--epub-title-page=false`）、目錄 nav 移出 spine（Books 用自己的目錄 UI）。Books 翻頁模式封面後仍有**一頁**空白——閱讀器強制每章從右手頁開始（同實體書），內容層關不掉，屬正常。
 - **拿不到封面不是錯**：不帶 `--cover` 照舊產無封面 epub，回報用戶即可（首開第一頁會是近空白 title page）。
 
 - 時間戳前綴是段落內文，pandoc 原樣保留 → epub 每段 `<p>` 開頭即帶時間戳（結構同參考的 Allen 3Q2026 epub）。

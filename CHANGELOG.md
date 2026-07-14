@@ -3,6 +3,28 @@
 All notable changes to `speech-to-prose` are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions track the `SKILL.md` frontmatter.
 
+## 0.6.1 - 2026-07-14
+
+### Fixes
+- **Blank pages in Apple Books reading flow.** Books' page-turn view forces every
+  linear spine document to start on a recto (right-hand) page, inserting blank
+  versos — with pandoc's default front matter (title page + HTML TOC) the book
+  opened onto consecutive blanks. Field-mapped page-by-page in Books, then
+  verified via NotebookLM research (20 sources): the recto rule is reader-side
+  and cannot be disabled from content for reflowable EPUBs, `linear="no"` has
+  reports of being ignored by Books, and a `hidden` nav still renders as a blank
+  page. Fix: `--epub-title-page=false` (title is on the cover and in metadata)
+  and remove the nav itemref from the spine entirely — EPUB 3.3 requires nav in
+  the manifest, not the spine, and Books builds its native TOC from the manifest.
+  Reading flow is now cover → chapter 1 with a single unavoidable blank verso
+  after the cover, same as a print book.
+
+### Tests
+- New assertions: no title_page in the archive; nav present in manifest with
+  `properties="nav"` but absent from spine. The `.navtmp` rewrite honors the
+  same artifact-safety contract (cleanup on all failure paths) — caught by the
+  existing injected-failure matrix.
+
 ## 0.6.0 - 2026-07-14
 
 ### Features

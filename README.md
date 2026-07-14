@@ -19,7 +19,7 @@ Pipeline (Chinese audio): dual-ASR (Breeze + VibeVoice, cross-referenced for ter
 
 **Noun verification pass** (Step 3.5): proper nouns that contradict their context (companies, tickers, people, jargon) are collected during integration, then verified through four evidence layers — whole-transcript phonetic cross-reference first (`scripts/noun_xref.py`: same entity is usually mentioned more than once and mis-recognized differently each time), local sources, then neutral web search with the model's guess barred from queries (hypothesis-driven search confirms itself). Unresolved nouns stay marked `〔註：…〕` rather than guessed. Confirmed fixes are applied per-occurrence and fed back into the speaker glossary.
 
-**EPUB with cover** (default on; `--no-epub` to skip): a timestamped-paragraph e-book via pandoc (`scripts/prose_to_epub.py`). `--cover <img>` embeds a cover image — YouTube thumbnail for videos, show/episode artwork for podcasts — so e-readers (e.g. Apple Books) open on a real cover page instead of a near-blank title page. jpg/png only (reader compatibility), validated fail-closed: magic-byte signature, container→OPF→spine relationship chain, temp-file build with atomic replace (a failed build never clobbers an existing EPUB).
+**EPUB with cover** (default on; `--no-epub` to skip): a timestamped-paragraph e-book via pandoc (`scripts/prose_to_epub.py`). `--cover <img>` embeds a cover image — YouTube thumbnail for videos, show/episode artwork for podcasts — so e-readers (e.g. Apple Books) open on a real cover page instead of a near-blank title page. jpg/png only (reader compatibility), validated fail-closed: magic-byte signature, container→OPF→spine relationship chain, temp-file build with atomic replace (a failed build never clobbers an existing EPUB). Front matter is trimmed for Apple Books' recto-start pagination: no title page, nav kept out of the spine (Books builds its own TOC from the manifest), so reading flow is cover → chapter 1 with a single unavoidable blank verso after the cover — same as a print book.
 
 **Bilingual for non-Chinese audio** (default): English (or other non-Chinese) audio is transcribed with Whisper large-v3 (mandatory anti-hallucination flags) and rendered as a **source-on-top / Traditional-Chinese-below** bilingual document, timestamped per paragraph (`prose_timestamp.py --bilingual`). This is for personal study; don't redistribute copyrighted material.
 
@@ -69,7 +69,7 @@ MIT.
 
 **名詞查證 pass**（Step 3.5）：整理時收集「與上下文矛盾的專有名詞」（公司、ticker、人名、術語），走四層查證——全文音近變體交叉比對優先（`scripts/noun_xref.py`：同一實體通常被提到多次、每次錯法不同）、本地資源、再來才是中性網路搜尋（**禁止把猜測放進 query**，帶假設搜尋只會自我證實）。查不動的保留〔註：…〕不硬改；確認的修正逐處套用並回寫講者術語表。
 
-**帶封面 EPUB**（預設開；`--no-epub` 跳過）：由帶時間戳的散文經 pandoc 產電子書（`scripts/prose_to_epub.py`）。`--cover <img>` 嵌入封面——YT 影片用縮圖、podcast 用節目/單集封面——電子書閱讀器（如 Apple Books）首開第一頁就是封面，不再是近乎空白的 title page。只收 jpg/png（閱讀器相容性），fail-closed 驗證：magic bytes 簽名、container→OPF→spine 關係鏈、temp 檔建置 + atomic replace（建置失敗絕不毀掉既有 EPUB）。
+**帶封面 EPUB**（預設開；`--no-epub` 跳過）：由帶時間戳的散文經 pandoc 產電子書（`scripts/prose_to_epub.py`）。`--cover <img>` 嵌入封面——YT 影片用縮圖、podcast 用節目/單集封面——電子書閱讀器（如 Apple Books）首開第一頁就是封面，不再是近乎空白的 title page。只收 jpg/png（閱讀器相容性），fail-closed 驗證：magic bytes 簽名、container→OPF→spine 關係鏈、temp 檔建置 + atomic replace（建置失敗絕不毀掉既有 EPUB）。前置頁已針對 Apple Books 的右手頁分頁精簡：不產題名頁、目錄 nav 移出 spine（Books 用 manifest 自建目錄 UI），閱讀流為「封面 → 第一章」，封面後僅剩一頁閱讀器強制的空白（同實體書）。
 
 **英文（非中文）影音預設產中英對照版**：用 Whisper large-v3（**反幻覺旗標必帶**）辨識，排成**來源語在上、繁中翻譯在下**、每段帶時間戳的對照文件（`prose_timestamp.py --bilingual`）。屬個人研讀用途，勿散布受著作權保護內容。
 

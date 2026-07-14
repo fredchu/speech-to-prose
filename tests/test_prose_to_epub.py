@@ -159,10 +159,25 @@ def test_real_pandoc_generates_valid_epub_with_body_text(tmp_path, monkeypatch, 
     assert "Paragraph body text." in text
     with zipfile.ZipFile(out) as zf:
         opf_name = next(name for name in zf.namelist() if name.endswith("content.opf"))
-        opf = ET.fromstring(zf.read(opf_name))
+        opf_text = zf.read(opf_name).decode("utf-8")
+        opf = ET.fromstring(opf_text)
         assert not [
             node for node in opf.iter()
             if "cover-image" in node.attrib.get("properties", "").split()
+        ]
+        # 前置頁精簡：無題名頁、nav 移出 spine 但留在 manifest（Apple Books 空白頁對策）
+        assert not [name for name in zf.namelist() if "title_page" in name]
+        nav_manifest_items = [
+            node for node in opf.iter()
+            if node.tag.rsplit("}", 1)[-1] == "item"
+            and "nav" in node.attrib.get("properties", "").split()
+        ]
+        assert len(nav_manifest_items) == 1
+        nav_id = nav_manifest_items[0].attrib["id"]
+        assert not [
+            node for node in opf.iter()
+            if node.tag.rsplit("}", 1)[-1] == "itemref"
+            and node.attrib.get("idref") == nav_id
         ]
     assert "cover=no" in capsys.readouterr().out
 

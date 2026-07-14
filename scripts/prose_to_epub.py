@@ -29,6 +29,56 @@ def first_title(md_path):
     return os.path.splitext(os.path.basename(md_path))[0]
 
 
+def _remove_nav_from_spine(epub_path):
+    """把 nav（目錄頁）的 itemref 從 spine 移除（manifest 保留 properties="nav"）。
+
+    Apple Books 翻頁模式下每個 spine 文件強制從右手頁開始，目錄頁留在閱讀流
+    會多吃一組「內容頁＋空白頁」。EPUB 3.3 不要求 nav 進 spine，閱讀器的原生
+    目錄 UI 讀 manifest 的 nav 文件，與閱讀流無關；linear="no" 有被 Apple
+    Books 忽略的實證回報，整個移除才穩。
+    """
+    with zipfile.ZipFile(epub_path) as z:
+        container = ET.fromstring(z.read("META-INF/container.xml"))
+        rootfile = next(
+            node for node in container.iter()
+            if node.tag.rsplit("}", 1)[-1] == "rootfile"
+        )
+        opf_member = posixpath.normpath(rootfile.attrib["full-path"])
+        opf_text = z.read(opf_member).decode("utf-8")
+        opf = ET.fromstring(opf_text)
+        nav_items = [
+            node for node in opf.iter()
+            if node.tag.rsplit("}", 1)[-1] == "item"
+            and "nav" in node.attrib.get("properties", "").split()
+        ]
+        if len(nav_items) != 1:
+            raise ValueError(f"nav manifest item 數量須為 1，實際為 {len(nav_items)}")
+        nav_id = nav_items[0].attrib["id"]
+        pattern = re.compile(
+            rf'[ \t]*<itemref\s+idref="{re.escape(nav_id)}"\s*/>\n?'
+        )
+        if not pattern.search(opf_text):
+            raise ValueError(f'spine 中找不到 <itemref idref="{nav_id}">')
+        new_opf = pattern.sub("", opf_text, count=1)
+        entries = [(info, z.read(info.filename)) for info in z.infolist()]
+
+    tmp = epub_path + ".navtmp"
+    try:
+        with zipfile.ZipFile(tmp, "w") as zout:
+            for info, data in entries:
+                if info.filename == opf_member:
+                    data = new_opf.encode("utf-8")
+                compress = (
+                    zipfile.ZIP_STORED if info.filename == "mimetype"
+                    else zipfile.ZIP_DEFLATED
+                )
+                zout.writestr(info, data, compress_type=compress)
+        os.replace(tmp, epub_path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def _validate_epub(epub_path, expect_cover):
     with zipfile.ZipFile(epub_path) as z:
         members = set(z.namelist())
@@ -196,6 +246,9 @@ def main():
                 "--metadata", "lang=zh-TW",
                 "--toc",                 # 產生目錄
                 "--split-level=2",       # 以 ## 章節標題切分成獨立章節（無 ## 時優雅退化為單章）
+                # 題名頁不進 spine（標題已在封面與 metadata）；Apple Books 翻頁模式
+                # 每個 spine 文件強制從右手頁開始，前置頁越多、開頭空白頁越多
+                "--epub-title-page=false",
             ]
             if cover:
                 cmd.append(f"--epub-cover-image={cover}")
@@ -206,6 +259,12 @@ def main():
                 return 2
             if not os.path.isfile(temp_path) or os.path.getsize(temp_path) == 0:
                 print("ERROR: pandoc 宣稱成功但無輸出檔", file=sys.stderr)
+                return 2
+
+            try:
+                _remove_nav_from_spine(temp_path)
+            except Exception as e:  # noqa: BLE001 - same artifact-safety contract
+                print(f"ERROR: nav spine 後處理失敗: {e}", file=sys.stderr)
                 return 2
 
             try:

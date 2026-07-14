@@ -3,6 +3,36 @@
 All notable changes to `speech-to-prose` are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions track the `SKILL.md` frontmatter.
 
+## 0.6.0 - 2026-07-14
+
+### Features
+- **EPUB output is now on by default.** Step 4.6 runs unless `--no-epub` (or the user
+  explicitly asks for md only); chapter headings (`## [HH:MM:SS] 主題`) are upgraded
+  from recommended to required so the default EPUB always gets a real TOC.
+- **Cover image support (`--cover <img>`) in `scripts/prose_to_epub.py`.** The skill
+  workflow fetches the YouTube thumbnail for video sources (`yt-dlp --write-thumbnail
+  --convert-thumbnails jpg`) or the show/episode artwork for podcasts. Fixes the
+  Apple Books first-open symptom: without a cover, the first spine item is pandoc's
+  near-empty title page, which renders as a blank-looking first page; with a cover,
+  Books opens on the cover image. Validation is fail-closed end to end:
+  - jpg/png allowlist (reader-compatibility policy — WebP is a legal EPUB 3.3 core
+    media type but conservative readers reject it) + magic-byte signature check;
+  - post-build relationship-chain validation inside the archive: `container.xml` →
+    OPF → the unique `properties="cover-image"` manifest item → first spine itemref →
+    wrapper XHTML parsed as XML and its image URI resolved and compared exactly
+    (no literal-path assumptions about pandoc internals);
+  - the EPUB is built to a `mkstemp` sibling temp and atomically `os.replace`d only
+    after validation passes — pandoc failures, validator exceptions, and replace
+    failures all clean the temp and never clobber an existing output.
+- Success line now reports `cover=yes/no`; top-level `OSError` converges to exit 2.
+
+### Tests
+- 6 → 17 tests: jpg/png relationship-chain assertions against real pandoc output,
+  input-failure matrix (missing / webp / mislabeled / empty cover), injected pandoc
+  failure, malformed-EPUB validator path, injected validator exception, injected
+  `os.replace` failure — each asserting byte-for-byte preservation of pre-existing
+  output and zero temp residue — plus idempotent double-build.
+
 ## 0.5.0 - 2026-07-06
 
 ### Features

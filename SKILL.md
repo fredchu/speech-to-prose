@@ -1,9 +1,9 @@
 ---
 name: speech-to-prose
-version: 0.5.0
+version: 0.6.0
 description: |
   把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是 SRT 字幕；
-  每段開頭帶對齊 ASR 的大概時間戳，可選輸出段落帶時間戳的 epub 電子書）。
+  每段開頭帶對齊 ASR 的大概時間戳，預設同時輸出段落帶時間戳的 epub 電子書）。
   中文影音跑雙路 ASR（Breeze + VibeVoice）整理成繁中散文；**英文（非中文）影音預設產「中英對照版」**
   （英文在上、繁中翻譯在下，段落帶時間戳）。輸出 .md，保留原始字句與段落、輕度清理。
   當用戶說「整理成短文」「整理成文字稿」「把錄音整理成文章」「逐字整理」「不要做字幕」「最接近原話」
@@ -31,7 +31,7 @@ mutating: true
 - **英文（非中文）影音預設產「中英對照版」**：英文（來源語）在上、繁中忠實翻譯在下，每段帶時間戳（見 Step 0.5 / 英文分支）。用戶明確只要純中文可覆寫。
 - 通過**散文品質 gate**（coverage 不足會警示）才算完成。
 - **不確定的專有名詞經「內部交叉比對＋有界查證」後才修正**（Step 3.5）：查證未收斂者保留〔註：…〕標記，絕不憑單一外部搜尋結果自信改詞。
-- **每段開頭帶對齊 ASR 時間軸的 `[HH:MM:SS]` 大概時間戳（預設開）**；可用 `--epub` 另輸出「段落帶時間戳」的 epub 電子書。
+- **每段開頭帶對齊 ASR 時間軸的 `[HH:MM:SS]` 大概時間戳（預設開）**；**預設另輸出「段落帶時間戳」的 epub 電子書**（`--no-epub` 或用戶明說只要 md 才關）。
 - 不產生 SRT 字幕、不嵌字幕。時間戳是**段落級大概值**（非逐句時間軸、非字幕）。
 
 ## Fidelity Mode（必先確定，預設 faithful）
@@ -145,7 +145,7 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 
 輸出寫到 `$WORK/<簡短名稱>_prose.md`（含標題行 + 來源/日期 meta）。
 
-**章節標題（供 epub 目錄，建議）**：在明顯主題轉折處插入 `## [HH:MM:SS] 主題` 標題（時間戳取該段），讓 `--epub` 切出章節目錄（`prose_to_epub.py` 已設 `--split-level=2`）。`##` 標題行不會被 Step 4.5 加段落時間戳（跳過 `#` 行）。約每 1-3 分鐘或每個主題一節；只有一個 `#` 標題、零 `##` 的 md 會產出「沒有章節的單章 epub」。
+**章節標題（供 epub 目錄，必做——epub 預設會產）**：在明顯主題轉折處插入 `## [HH:MM:SS] 主題` 標題（時間戳取該段），讓 epub 切出章節目錄（`prose_to_epub.py` 已設 `--split-level=2`）。`##` 標題行不會被 Step 4.5 加段落時間戳（跳過 `#` 行）。約每 1-3 分鐘或每個主題一節；只有一個 `#` 標題、零 `##` 的 md 會產出「沒有章節的單章 epub」。
 
 > 以上是**雲端模式（預設）**。要本地整理見 Step 3b。
 
@@ -242,14 +242,24 @@ python3 "$SP_DIR/scripts/prose_timestamp.py" "$WORK/<檔名>_en.srt" "$WORK/<簡
 - 輸出摘要 `段數/錨點/覆蓋率/首尾時間/非單調`；**覆蓋率應 > 0.6、非單調應為 0**，否則查。
 - 標題（`#`）、前言（`>` blockquote / YAML front matter）、code fence 區塊不加戳。時間戳是大概值，**內容近乎重複的相鄰段可能共用時間戳**（對齊本質限制，不影響單調）。
 
-### Step 4.6：可選 epub（`--epub` 時才做）
+### Step 4.6：epub（預設做；`--no-epub` 或用戶明說只要 md 才跳過）
 
-用戶要「段落帶時間戳的 epub 電子書」時，由**已加戳的** md 產 epub（包 pandoc）：
+由**已加戳的** md 產「段落帶時間戳的 epub 電子書」（包 pandoc）。**預設帶封面**（Books 首開第一頁即封面；無封面時 pandoc title page 在 Books 首開近乎空白、像壞掉）：
 
 ```bash
-python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
-# 預設輸出同目錄同名 .epub；title 取 md 第一個 # 標題
+# 1) 取封面（YT 影片 → 縮圖；podcast → 節目/單集封面。yt-dlp 支援的平台同一招）
+yt-dlp --skip-download --write-thumbnail --convert-thumbnails jpg -o "$WORK/cover" "<url>"
+# YT 縮圖原生常是 webp，--convert-thumbnails jpg 需 ffmpeg（srt 環境已有）
+# 純 RSS podcast：抓 episode/show artwork URL 下載存成 $WORK/cover.jpg
+# 本地檔來源沒有封面 → 跳過，不帶 --cover
+
+# 2) 產 epub
+python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md" --cover "$WORK/cover.jpg"
+# 預設輸出同目錄同名 .epub；title 取 md 第一個 # 標題；成功行含 cover=yes/no
 ```
+
+- `--cover` 只收 jpg/png（Apple Books 相容性策略；webp 是合法 EPUB media type 但先轉檔）；驗 magic bytes、關係鏈（OPF cover-image ↔ spine 首項 wrapper）、temp+atomic replace，全 fail-closed exit 2。
+- **拿不到封面不是錯**：不帶 `--cover` 照舊產無封面 epub，回報用戶即可（首開第一頁會是近空白 title page）。
 
 - 時間戳前綴是段落內文，pandoc 原樣保留 → epub 每段 `<p>` 開頭即帶時間戳（結構同參考的 Allen 3Q2026 epub）。
 - **章節目錄**：`--toc --split-level=2` 把 md 的 `## 標題` 切成獨立章節 + 產目錄。所以 Step 3 要在主題轉折插 `## [HH:MM:SS] 主題`，否則 epub 只有時間戳、沒有章節（2026-07-05 踩過：早期散文只有一個 `#` 標題 → 產出無章節單章 epub）。
@@ -257,7 +267,7 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
 
 ### Step 5：交付 + 清理
 
-- 把成品 `.md`（已加戳）交付（預設複製到 `inbox/`，或用戶指定位置）；若有跑 `--epub`，epub 一併交付。
+- 把成品 `.md`（已加戳）＋ epub（預設有；跳過 Step 4.6 時無）交付（預設複製到 `inbox/`，或用戶指定位置）。
 - 清理中間檔（`_breeze.txt`/`_vv.txt`/`_uncertain*.json`/ASR 暫存），**保留原音檔、srt（時間戳來源）、成品 .md / .epub**。
 
 ## 完成後回報
@@ -271,14 +281,14 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md"
 ## Output（持久化位置宣告）
 
 - 成品短文 `.md`（已加段落時間戳）：`${SRT_DATA_DIR}/prose/<簡短名稱>/<簡短名稱>_prose.md`，並複製一份到 `inbox/`（或用戶指定路徑）。
-- 可選 epub（`--epub`）：同目錄 `<簡短名稱>_prose.epub`，一併交付。
+- epub（預設）：同目錄 `<簡短名稱>_prose.epub`，一併交付（`--no-epub` 時不產）。
 - 中間 ASR 產物：工作目錄內，Step 5 清理（srt 保留為時間戳來源）。
 
 ## 邊界與限制
 - **段落時間戳是大概值**：錨定段誤差數秒、內插段可能微飄，但全程單調不亂序，供對照影片足夠，非逐句字幕精度。覆蓋率過低會 fail-closed（見 Step 4.5）。
 - **英文分支**：單路 Whisper（無雙路交叉比對），**反幻覺旗標必帶**（見 Step 1 英文分支；預設會幻覺迴圈吃內容，跑完必掃尾段）。中英對照為**個人研讀用途**（公開內容的私用轉錄/翻譯），成品加註勿轉散布。
 - **`--bilingual` 對齊只對每區塊首行（來源語）**，結構契約是「來源語一行在上、譯文一行在下」；譯文行不對齊不加戳，首行若中文為主會被判畸形跳過。
-- **epub 需 pandoc**（`brew install pandoc`）；無 pandoc 時 `--epub` fail-closed，不影響 .md 產出。
+- **epub 需 pandoc**（`brew install pandoc`）；無 pandoc 時 epub fail-closed（回報並提示安裝），不影響 .md 產出。
 - 純音檔跳過任何畫面/投影片處理（本技能本來就不做 caption）。
 - 不做 speaker diarization（多人只在 ASR 明顯輪流時分段）。
 - 極短音檔（< ~30 秒）避免過度分段與過度潤稿。

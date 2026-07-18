@@ -3,6 +3,42 @@
 All notable changes to `speech-to-prose` are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions track the `SKILL.md` frontmatter.
 
+## 0.7.0 - 2026-07-18
+
+### Features
+- **Deterministic punctuation normalization (`scripts/punct_normalize.py` + mandatory
+  Step 3.9).** Chinese prose gets fullwidth punctuation throughout; `--mode bilingual`
+  normalizes only Chinese translation lines and leaves English source lines halfwidth.
+  Only halfwidth punctuation adjacent to CJK characters is converted, so timestamps
+  (`[00:12:34]`), URLs and pure-English sentences are naturally untouched; idempotent,
+  skips code fences / blockquotes / YAML front matter. Motivated by a 4-segment
+  subagent run where two segments drifted to halfwidth commas while two stayed
+  fullwidth — a prompt contract alone does not hold, so the pipeline now backstops it
+  with a script. The punctuation contract is also stated explicitly in the Step 3
+  integration rules.
+
+### Docs
+- **Workspace hygiene: keep `prose/` media out of git.** The work directory
+  accumulates source audio (~50–200 MB per item); if `${DATA_DIR}` lives inside a
+  git repo, move the physical `prose/` directory outside the repo and symlink it
+  back (skill paths unchanged), with a `.gitignore` entry as backstop.
+
+### Docs (first real-world e2e of the bilingual English branch — 3 videos, 20 min ×2 + 1.5 h)
+- **Chinese branch: `.wav` input is now explicitly forbidden.** `subtitle.sh` converts
+  its input to a *same-named* 16 kHz wav, so a `.wav` input makes ffmpeg overwrite its
+  own source in place and fail — and a wrapper script without `set -e` will still
+  report success. Documented the m4a workaround and the "verify the .srt artifact
+  exists" rule.
+- **English-branch coverage gate documented.** `prose_coverage.py` counts Han
+  characters only, so it is blind on the English branch; the interim gate is
+  source-line English word count ÷ ASR word count with the same 0.6–1.3 thresholds
+  (measured 0.94–1.00 across three videos). `--lang en` implementation pending.
+- **Long-content segmented dispatch playbook.** Chapter-heading times must come from
+  a deterministic word-offset → srt cumulative-word mapping, not text matching
+  (after noun fixes the prose no longer matches the srt's mishearings; matching
+  both misses and false-positives). Also: subagent note format pinned to fullwidth
+  colon, and a mandatory tautological-note cleanup pass after applying noun fixes.
+
 ## 0.6.1 - 2026-07-14
 
 ### Fixes

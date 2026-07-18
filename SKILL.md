@@ -1,6 +1,6 @@
 ---
 name: speech-to-prose
-version: 0.6.1
+version: 0.7.0
 description: |
   把音檔/影片/YouTube 轉成「忠於原話的繁體中文整理短文」（不是 SRT 字幕；
   每段開頭帶對齊 ASR 的大概時間戳，預設同時輸出段落帶時間戳的 epub 電子書）。
@@ -73,6 +73,8 @@ mkdir -p "$WORK"
 # 本地檔 cp 進 WORK（不動原檔）；YouTube 用 srt 的 yt-dlp 慣例下載到 WORK
 ```
 
+> ⚠️ 工作目錄會累積原音檔等大型媒體檔。若 `${DATA_DIR}` 位於 git repo 內，建議把 `prose/` 實體目錄放到 repo 外、原位置以 symlink 連回（skill 路徑不變、媒體不進 git），並在 repo 的 `.gitignore` 加上該路徑作為 backstop。若你的環境已這樣設置，不要把 symlink「修正」回真目錄。
+
 ### Step 0.5：語言偵測 → 決定分支
 
 - **YouTube**：`yt-dlp --skip-download --print "%(language)s" "<url>"`。
@@ -89,6 +91,8 @@ cd "$WORK" && python3 "$VV_SCRIPT" "$WORK/<檔名>" --terms "$TERMS" --terms-max
     --output "$WORK/<檔名>_vibevoice.srt"                            # VibeVoice 輔（平行）
 ```
 兩者可平行（Breeze + VV 是 srt 標準平行組合）。
+
+⚠️ **輸入檔不可以是 .wav**：subtitle.sh 會把輸入轉成**同名** 16kHz wav，.wav 輸入等於 ffmpeg 原地覆寫自己、直接失敗（2026-07-16 實測，且失敗後外層腳本沒 set -e 會假裝成功——確認產物 srt 存在才算數）。來源是 wav 先轉 m4a（`ffmpeg -i in.wav -c:a aac in.m4a`），YouTube 下載直接用 `-x --audio-format m4a`。
 
 **長音檔（> 55 分鐘）必須走切段**（mlx_audio 硬限 59 分，超過靜默 trim）：
 ```bash
@@ -122,6 +126,7 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 把兩版純文字交給 LLM 整理成 faithful 短文。**規則**：
 - 以 Breeze 版為骨幹（逐句較細），用 VV 版交叉比對**英文名詞、財經術語、同音字**（VV 標點較完整可參考）。
 - **保留原始字句**：補標點、修 ASR 錯字、修英文拼寫、分段、刪純語助詞；不摘要、不改語意、不換句型。
+- **標點契約**：中文散文一律**全形標點**（，。：；？！）；英文句內（前後都是拉丁字元）維持半形。分段 subagent 常各自漂移，Step 3.9 有 deterministic 正規化兜底，但 prompt 仍應明示此契約。
 - 講者明顯離題的插話（如旁白）可獨立成段保留，不刪。
 - 多人對話：**不做 speaker diarization**；只有當 ASR 文字本身明顯有輪流（你問我答）才用分段呈現，否則輸出連續散文。
 - 不確定的人名/作品/時事用語不要改（講者可能引用你不知道的東西）；ASR 嚴重聽不清處用〔註：…〕標記，不硬填。
@@ -157,6 +162,7 @@ python3 "$SP_DIR/scripts/srt_to_text.py" "$WORK/<檔名>_vibevoice.srt"  > "$WOR
 - **繁中翻譯（faithful，台灣用語）**：忠實翻譯該段，不摘要不加料；技術術語保留英文原文，其餘自然中文；語氣貼近講者。
 - **版面**：每個段落單元 = 一行英文（來源語）在上、一行繁中翻譯在下，單元間空行分隔。**英文與中文各自只佔一行**（段落內文不換行，用標點連貫）——這是 `prose_timestamp.py --bilingual` 的結構契約。
 - **分派**：短內容主 session 直接做；長內容（>~300 行）派 Sonnet subagent 產草稿（EN 段 + ZH 段，同上格式），主 session 校術語。
+- **長內容分段實務**（2026-07-16 以 1.5h 訪談實證）：(1) 句子邊界＋等字數切段，**記下各段字數偏移**；(2) 章節標題時間用「字數偏移 → srt 累計字數」映射取得（deterministic、天然單調）——**不要用文字匹配**：名詞修正後散文與 srt 的原始誤聽對不上，匹配會漏也會假中；(3) subagent 的〔註〕規定用全形冒號統一格式；(4) 名詞修正套用後必再跑一輪冗餘註清理（「X〔註：或為 X〕」型套套邏輯）。
 - **著作權**：對公開演講/影片做**個人研讀用**的轉錄+翻譯（存私人 inbox、不公開散布）屬合理個人使用；成品加註「個人研讀用，勿轉散布」。
 
 輸出寫到 `$WORK/<簡短名稱>_prose.md`（標題 + meta + 對照段落，先不加時間戳，交給 Step 4.5 `--bilingual`）。同中文分支：在主題轉折處插 `## [HH:MM:SS] 主題` 章節標題供 epub 目錄。
@@ -212,6 +218,21 @@ python3 "$SP_DIR/scripts/noun_xref.py" --term "<詞1>" --term "<詞2>" \
 **不可驗證類**：會員 ID、暱稱、私人人名→永不搜尋，直接標註。
 **收尾**：刪 `$WORK/_uncertain*.json`（保證 Step 4/4.5 輸入乾淨）。
 
+### Step 3.9：標點正規化（deterministic，必跑）
+
+LLM 整理（尤其分段 subagent）常在全形/半形標點間漂移，靠 prompt 不可靠，一律用腳本兜底：
+
+```bash
+# 中文散文：CJK 相鄰的半形 , : ; ? ! .（句點需前字元為 CJK）→ 全形
+python3 "$SP_DIR/scripts/punct_normalize.py" "$WORK/<簡短名稱>_prose.md"
+# 中英對照版：只動 CJK 佔比 > 0.3 的譯文行，來源語（英文）行原樣保留
+python3 "$SP_DIR/scripts/punct_normalize.py" "$WORK/<簡短名稱>_prose.md" --mode bilingual
+```
+
+- 冪等；只轉換與 CJK 相鄰的半形標點——時間戳 `[00:12:34]`、URL、純英文句（`A, B` 兩側都是拉丁字元）天然不動。
+- 跳過 code fence、`>` blockquote（meta 行）、YAML front matter。
+- 在 Step 4 coverage 之前跑（時間戳前後跑都安全，但慣例放這裡）。
+
 ### Step 4：散文品質 gate（散文沒有 SRT 的機械不變量，需自己驗）
 
 ```bash
@@ -222,6 +243,8 @@ python3 "$SP_DIR/scripts/prose_coverage.py" --asr "$WORK/_breeze.txt" --prose "$
 - ratio > 1.3 → WARN「可能加料/過度潤稿」，回 Step 3 收。
 - 0.6–1.3 → 通過（faithful 整理通常比 ASR 略短：刪語助詞）。
 gate 只警示不阻斷，但 WARN 必須處理或向用戶說明。
+
+**英文/對照分支的 coverage**：`prose_coverage.py` 只算中文字數，英文分支不適用。改用英文字數比對：prose 各區塊首行（來源語行）總字數 ÷ ASR 純文字總字數，門檻同 0.6–1.3（2026-07-16 三部英文片實測 0.94–1.00）。待固化為 `prose_coverage.py --lang en`。
 
 ### Step 4.5：段落時間戳（deterministic，預設開）
 
@@ -281,7 +304,7 @@ python3 "$SP_DIR/scripts/prose_to_epub.py" "$WORK/<簡短名稱>_prose.md" --cov
 
 ## Output（持久化位置宣告）
 
-- 成品短文 `.md`（已加段落時間戳）：`${SRT_DATA_DIR}/prose/<簡短名稱>/<簡短名稱>_prose.md`，並複製一份到 `inbox/`（或用戶指定路徑）。
+- 成品短文 `.md`（已加段落時間戳）：`${SRT_DATA_DIR}/prose/<簡短名稱>/<簡短名稱>_prose.md`（`prose/` 可為指向 repo 外的 symlink，見 Step 0），並複製一份到 `inbox/`（或用戶指定路徑）。
 - epub（預設）：同目錄 `<簡短名稱>_prose.epub`，一併交付（`--no-epub` 時不產）。
 - 中間 ASR 產物：工作目錄內，Step 5 清理（srt 保留為時間戳來源）。
 

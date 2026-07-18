@@ -23,6 +23,8 @@ Pipeline (Chinese audio): dual-ASR (Breeze + VibeVoice, cross-referenced for ter
 
 **Bilingual for non-Chinese audio** (default): English (or other non-Chinese) audio is transcribed with Whisper large-v3 (mandatory anti-hallucination flags) and rendered as a **source-on-top / Traditional-Chinese-below** bilingual document, timestamped per paragraph (`prose_timestamp.py --bilingual`). This is for personal study; don't redistribute copyrighted material.
 
+**Punctuation normalization** (deterministic, mandatory): Chinese prose gets fullwidth punctuation throughout; bilingual documents keep halfwidth on English source lines and normalize only the Chinese translation lines (`scripts/punct_normalize.py`, `--mode bilingual`). Only halfwidth punctuation adjacent to CJK characters is converted, so timestamps, URLs and pure-English sentences are naturally untouched; idempotent. Exists because LLM subagents drift between punctuation styles across segments — the script backstops the prompt contract.
+
 ### Why a separate skill
 
 Prose has fewer mechanical invariants than SRT, so omission and over-editing are harder to detect. It needs its own quality gate (`scripts/prose_coverage.py`) and a pinned **fidelity mode** (default: faithful, not summary) so the LLM doesn't silently normalize away the original voice. It reuses `srt`'s ASR via a documented adapter contract instead of duplicating it.
@@ -72,6 +74,8 @@ MIT.
 **帶封面 EPUB**（預設開；`--no-epub` 跳過）：由帶時間戳的散文經 pandoc 產電子書（`scripts/prose_to_epub.py`）。`--cover <img>` 嵌入封面——YT 影片用縮圖、podcast 用節目/單集封面——電子書閱讀器（如 Apple Books）首開第一頁就是封面，不再是近乎空白的 title page。只收 jpg/png（閱讀器相容性），fail-closed 驗證：magic bytes 簽名、container→OPF→spine 關係鏈、temp 檔建置 + atomic replace（建置失敗絕不毀掉既有 EPUB）。前置頁已針對 Apple Books 的右手頁分頁精簡：不產題名頁、目錄 nav 移出 spine（Books 用 manifest 自建目錄 UI），閱讀流為「封面 → 第一章」，封面後僅剩一頁閱讀器強制的空白（同實體書）。
 
 **英文（非中文）影音預設產中英對照版**：用 Whisper large-v3（**反幻覺旗標必帶**）辨識，排成**來源語在上、繁中翻譯在下**、每段帶時間戳的對照文件（`prose_timestamp.py --bilingual`）。屬個人研讀用途，勿散布受著作權保護內容。
+
+**標點正規化**（deterministic，必跑）：中文散文一律全形標點；對照版英文來源行維持半形、只正規化中文譯文行（`scripts/punct_normalize.py`，`--mode bilingual`）。只轉換與 CJK 相鄰的半形標點——時間戳、URL、純英文句天然不動；冪等。存在的原因：分段派 LLM subagent 時各段標點風格會漂移，腳本兜底、不靠 prompt 約定。
 
 ### 為什麼獨立成技能
 
